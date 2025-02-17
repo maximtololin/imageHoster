@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"  # Фиксим порты, чтобы Nginx знал, куда проксировать
+    volumes:
+      - images:/app/images
+      - logs:/app/logs
+    networks:
+      - hosting_network
+
+  nginx:
+    container_name: nginx
+    image: nginx:latest
+    command: nginx -g 'daemon off;'
+    ports:
+      - "8080:80"  # Фиксим порты, чтобы Nginx был доступен на 8080
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - images:/app/images  # Фиксим volume, чтобы Nginx видел файлы
+    networks:
+      - hosting_network
+    depends_on:
+      - app
+
+networks:
+  hosting_network:
+
+volumes:
+  images:
+  logs:

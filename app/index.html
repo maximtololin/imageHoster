@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Hoster</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        p {
+            font-size: 18px;
+            color: #555;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            display: inline-block;
+            text-align: left;
+        }
+        #uploaded-link {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
+            display: none;
+        }
+        #uploaded-link a {
+            color: #007bff;
+            font-weight: bold;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Добро пожаловать в Image Hoster</h1>
+    <p>Загрузите изображение и получите прямую ссылку на него.</p>
+
+    <div class="instructions">
+        <h3>Как загрузить изображение?</h3>
+        <ul>
+            <li>Выберите файл в формате <strong>JPG, PNG или GIF</strong>.</li>
+            <li>Нажмите кнопку <strong>"Загрузить"</strong>.</li>
+            <li>После загрузки появится ссылка на изображение.</li>
+        </ul>
+    </div>
+
+    <!-- Форма для загрузки -->
+    <form id="upload-form">
+        <input type="file" id="file-input" accept="image/jpeg, image/png, image/gif" required>
+        <button type="submit">Загрузить</button>
+    </form>
+
+    <!-- Ссылка на загруженное изображение -->
+    <p id="uploaded-link">Ваше изображение доступно по ссылке: <a href="#" target="_blank" id="image-link"></a></p>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            let fileInput = document.getElementById('file-input');
+            let file = fileInput.files[0];
+
+            if (!file) {
+                alert("Выберите файл!");
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                let response = await fetch("/upload", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (response.ok) {
+                    let data = await response.json();
+                    alert('Изображение загружено!');
+                    showUploadedLink(data.file_url);
+                } else {
+                    alert('Ошибка загрузки!');
+                }
+            } catch (error) {
+                alert("Ошибка соединения с сервером.");
+            }
+        });
+
+        function showUploadedLink(url) {
+    let uploadedLink = document.getElementById('uploaded-link');
+    let imageLink = document.getElementById('image-link');
+
+    // Исправляем URL, заменяя порт 8000 на 8080
+    let correctedUrl = url.replace(":8000", ":8080");
+
+    imageLink.href = correctedUrl;
+    imageLink.textContent = correctedUrl;
+    uploadedLink.style.display = "block";
+}
+    </script>
+
+</body>
+</html>

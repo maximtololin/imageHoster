@@ -1,0 +1,17 @@
+curl -X POST http://localhost:8080/upload \
+     -H "Content-Type: multipart/form-data" \
+     -F "file=@/Users/maximtololin/Downloads/World-of-Tanks.gif"
+
+curl -X POST http://localhost:8080/upload \
+     -H "Filename: test.jpg" \
+     -H "Content-Type: image/jpeg" \
+     --data-binary @/Users/maximtololin/Downloads/World-of-Tanks.gif
+
+
+docker build -t app .
+
+docker run --name app -p 80:8000 app
+
+docker compose build --no-cache
+
+docker compose up
