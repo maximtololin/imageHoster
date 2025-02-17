@@ -37,7 +37,8 @@ docker-compose up --build
 
 ## 📄 Отчет о производительности
 
-[Открыть отчет в браузере](ImageHoster-performance-report-1.html)
+![Вот он](/iScreen_Shoter_Google_Chrome_250217175811.jpg)
+
 
 
 
