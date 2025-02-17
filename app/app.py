@@ -1,13 +1,10 @@
 import os
 import uuid
 import json
-import mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from io import BytesIO
 from loguru import logger
 import cgi
 
-# Настройки
 UPLOAD_DIR = "images"
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 LOG_FILE = os.path.join(LOG_DIR, "server.log")
@@ -15,7 +12,7 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif'}
 SERVER_ADDRESS = ('0.0.0.0', 8000)
 
-# Создаем необходимые директории
+# директории
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -24,9 +21,15 @@ logger.add(LOG_FILE, format="[{time:YYYY-MM-DD HH:mm:ss}] {level}: {message}", l
 
 
 class ImageHostingHandler(BaseHTTPRequestHandler):
+    """
+    Обработчик HTTP-запросов для сервиса загрузки изображений.
+    """
     server_version = 'Image Hosting Server/0.3'
 
     def __init__(self, request, client_address, server):
+        """
+        Инициализация маршрутов сервера.
+        """
         self.routes = {
             '/': self.route_get_index,
             '/index.html': self.route_get_index,
@@ -43,6 +46,10 @@ class ImageHostingHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        """
+        Обрабатывает GET-запросы. Если маршрут найден — вызываем соответствующую функцию.
+        Если маршрут отсутствует, возвращаем 404.
+        """
         if self.path in self.routes:
             self.routes[self.path]()
         else:
@@ -59,6 +66,9 @@ class ImageHostingHandler(BaseHTTPRequestHandler):
         self.wfile.write(open('index.html', 'rb').read())
 
     def do_POST(self):
+        """
+        Обрабатывает POST-запросы. Если запрос идет на /upload, вызываем обработчик загрузки.
+        """
         if self.path == '/upload':
             self.route_post_upload()
         else:
@@ -67,6 +77,14 @@ class ImageHostingHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def route_post_upload(self):
+        """
+        Обрабатывает загрузку изображений.
+        - Проверяет заголовки запроса (Content-Length, Content-Type)
+        - Принимает файл, проверяет формат и размер
+        - Генерирует уникальное имя файла
+        - Сохраняет файл на сервер
+        - Возвращает JSON-ответ с URL загруженного изображения
+        """
         logger.info(f'POST {self.path}')
 
         # Проверяем Content-Length
@@ -104,7 +122,7 @@ class ImageHostingHandler(BaseHTTPRequestHandler):
 
         file_item = form["file"]
 
-        # Проверяем, был ли загружен файл
+        # Проверяем, был ли загружен файл (имеет ли он имя)
         if not file_item.filename:
             logger.error("Ошибка 400: передан пустой файл")
             self.send_response(400, "Bad Request")
