@@ -1,175 +1,274 @@
 import os
 import uuid
-import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import datetime
+from typing import List, Optional
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.requests import Request
+from pydantic import BaseModel
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from loguru import logger
-import cgi
+import shutil
+import sys
 
+# Конфигурация
 UPLOAD_DIR = "images"
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-LOG_FILE = os.path.join(LOG_DIR, "server.log")
+LOG_DIR = "logs"
+BACKUP_DIR = "backups"
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif'}
-SERVER_ADDRESS = ('0.0.0.0', 8000)
 
-# директории
+# Создание директорий
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # Настройка логирования
-logger.add(LOG_FILE, format="[{time:YYYY-MM-DD HH:mm:ss}] {level}: {message}", level="INFO")
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
+logger.remove()  # Удаляем все существующие обработчики
+logger.add(
+    LOG_FILE,
+    format="[{time:YYYY-MM-DD HH:mm:ss}] {level}: {message}",
+    level="INFO",
+    rotation="10 MB",  # Ротация логов при достижении 10MB
+    retention="1 week"  # Хранение логов в течение недели
+)
+logger.add(
+    sys.stderr,  # Также выводим логи в консоль
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
 
+# Модели Pydantic
+class ImageResponse(BaseModel):
+    id: int
+    filename: str
+    original_name: str
+    size: int
+    upload_time: datetime
+    file_type: str
 
-class ImageHostingHandler(BaseHTTPRequestHandler):
-    """
-    Обработчик HTTP-запросов для сервиса загрузки изображений.
-    """
-    server_version = 'Image Hosting Server/0.3'
+class ImageListResponse(BaseModel):
+    images: List[ImageResponse]
+    total: int
+    page: int
+    per_page: int
 
-    def __init__(self, request, client_address, server):
-        """
-        Инициализация маршрутов сервера.
-        """
-        self.routes = {
-            '/': self.route_get_index,
-            '/index.html': self.route_get_index,
-            '/upload': self.route_post_upload,
-        }
-        super().__init__(request, client_address, server)
+# Инициализация FastAPI
+app = FastAPI(title="Image Hosting Service")
 
-    def do_OPTIONS(self):
-        """Обрабатывает preflight-запросы для CORS"""
-        self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
+# Инициализация шаблонов
+templates = Jinja2Templates(directory="templates")
 
-    def do_GET(self):
-        """
-        Обрабатывает GET-запросы. Если маршрут найден — вызываем соответствующую функцию.
-        Если маршрут отсутствует, возвращаем 404.
-        """
-        if self.path in self.routes:
-            self.routes[self.path]()
-        else:
-            logger.error(f'GET 404 {self.path}')
-            self.send_response(404, "Not Found")
-            self.end_headers()
-
-    def route_get_index(self):
-        logger.info(f'GET {self.path}')
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(open('index.html', 'rb').read())
-
-    def do_POST(self):
-        """
-        Обрабатывает POST-запросы. Если запрос идет на /upload, вызываем обработчик загрузки.
-        """
-        if self.path == '/upload':
-            self.route_post_upload()
-        else:
-            logger.error(f'POST 404 {self.path}')
-            self.send_response(404, "Not Found")
-            self.end_headers()
-
-    def route_post_upload(self):
-        """
-        Обрабатывает загрузку изображений.
-        - Проверяет заголовки запроса (Content-Length, Content-Type)
-        - Принимает файл, проверяет формат и размер
-        - Генерирует уникальное имя файла
-        - Сохраняет файл на сервер
-        - Возвращает JSON-ответ с URL загруженного изображения
-        """
-        logger.info(f'POST {self.path}')
-
-        # Проверяем Content-Length
-        content_length = self.headers.get('Content-Length')
-        if not content_length:
-            logger.error("Ошибка 411: нет заголовка Content-Length")
-            self.send_response(411, "Length Required")
-            self.end_headers()
-            return
-
-        content_length = int(content_length)
-        if content_length > MAX_FILE_SIZE:
-            logger.error("Ошибка 413: файл превышает 5MB")
-            self.send_response(413, "Payload Too Large")
-            self.end_headers()
-            return
-
-        # Проверяем заголовок Content-Type
-        content_type = self.headers.get('Content-Type')
-        if not content_type or "multipart/form-data" not in content_type:
-            logger.error(f"Ошибка 415: неподдерживаемый формат файла - {content_type}")
-            self.send_response(415, "Unsupported Media Type")
-            self.end_headers()
-            return
-
-        # Разбираем multipart/form-data
-        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={'REQUEST_METHOD': 'POST'})
-
-        # Проверяем, есть ли файл в запросе
-        if "file" not in form:
-            logger.error("Ошибка 400: файл не был передан")
-            self.send_response(400, "Bad Request")
-            self.end_headers()
-            return
-
-        file_item = form["file"]
-
-        # Проверяем, был ли загружен файл (имеет ли он имя)
-        if not file_item.filename:
-            logger.error("Ошибка 400: передан пустой файл")
-            self.send_response(400, "Bad Request")
-            self.end_headers()
-            return
-
-        # Определяем расширение файла
-        _, ext = os.path.splitext(file_item.filename)
-        ext = ext.lower()
-
-        if ext not in ALLOWED_EXTENSIONS:
-            logger.error(f"Ошибка 415: неподдерживаемый формат файла - {ext}")
-            self.send_response(415, "Unsupported Media Type")
-            self.end_headers()
-            return
-
-        # Генерируем уникальное имя файла
-        image_id = uuid.uuid4()
-        file_path = os.path.join(UPLOAD_DIR, f"{image_id}{ext}")
-
-        # Сохраняем файл
-        with open(file_path, 'wb') as f:
-            f.write(file_item.file.read())
-
-        logger.info(f"Изображение {image_id}{ext} загружено.")
-
-        # Отправляем JSON-ответ с URL загруженного файла
-        self.send_response(201)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-
-        response = {"status": "success", "file_url": f'http://{SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]}/{file_path}'}
-        self.wfile.write(json.dumps(response).encode('utf-8'))
-
-
-def run():
-    httpd = HTTPServer(SERVER_ADDRESS, ImageHostingHandler)
-    logger.info(f"Сервер запущен на {SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]}")
-    print(f"Server started at http://{SERVER_ADDRESS[0]}:{SERVER_ADDRESS[1]}")
+# Подключение к базе данных
+def get_db_connection():
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Остановка сервера по запросу пользователя.")
-        print("\nShutting down server...")
-        httpd.server_close()
+        conn = psycopg2.connect(
+            dbname=os.getenv("POSTGRES_DB", "images_db"),
+            user=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", "password"),
+            host=os.getenv("POSTGRES_HOST", "db"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+            cursor_factory=RealDictCursor
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"Ошибка подключения к базе данных: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка подключения к базе данных")
 
+def init_db():
+    """Инициализация базы данных"""
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS images (
+                    id SERIAL PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    file_type TEXT NOT NULL
+                );
+            """)
+            conn.commit()
+            logger.info("Таблица images успешно создана или уже существует")
+    except Exception as e:
+        error_msg = f"Ошибка при инициализации базы данных: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
-if __name__ == "__main__":
-    run()
+# Инициализация базы данных при старте приложения
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Инициализация приложения...")
+    init_db()
+    logger.info("Приложение успешно инициализировано")
+
+# Маршруты
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.post("/upload")
+async def upload_image(file: UploadFile = File(...)):
+    try:
+        # Проверка размера файла
+        if file.size > MAX_FILE_SIZE:
+            error_msg = f"Файл слишком большой: {file.size} байт (максимум {MAX_FILE_SIZE} байт)"
+            logger.error(error_msg)
+            raise HTTPException(status_code=413, detail=error_msg)
+
+        # Проверка расширения файла
+        _, ext = os.path.splitext(file.filename)
+        ext = ext.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            error_msg = f"Неподдерживаемый формат файла: {ext}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=415, detail=error_msg)
+
+        # Генерация уникального имени файла
+        image_id = str(uuid.uuid4())
+        filename = f"{image_id}{ext}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+
+        # Сохранение файла
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            logger.info(f"Файл успешно сохранен: {filename}")
+        except Exception as e:
+            error_msg = f"Ошибка сохранения файла {filename}: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        # Сохранение метаданных в базу данных
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO images (filename, original_name, size, file_type)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (filename, file.filename, file.size, ext[1:])
+                )
+                image_id = cursor.fetchone()["id"]
+                conn.commit()
+                logger.info(f"Метаданные файла {filename} успешно сохранены в базу данных")
+        except Exception as e:
+            error_msg = f"Ошибка сохранения метаданных файла {filename}: {str(e)}"
+            logger.error(error_msg)
+            os.remove(file_path)
+            raise HTTPException(status_code=500, detail=error_msg)
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+        return JSONResponse(
+            status_code=201,
+            content={
+                "status": "success",
+                "id": image_id,
+                "file_url": f"/images/{filename}"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Неожиданная ошибка при загрузке файла: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/images-list", response_class=HTMLResponse)
+async def get_images_list(
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100)
+):
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            # Получение общего количества изображений
+            cursor.execute("SELECT COUNT(*) FROM images")
+            total = cursor.fetchone()["count"]
+
+            # Получение изображений для текущей страницы
+            offset = (page - 1) * per_page
+            cursor.execute(
+                """
+                SELECT * FROM images
+                ORDER BY upload_time DESC
+                LIMIT %s OFFSET %s
+                """,
+                (per_page, offset)
+            )
+            images = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Ошибка получения списка изображений: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка получения списка изображений")
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        "images_list.html",
+        {
+            "request": request,
+            "images": images,
+            "total": total,
+            "page": page,
+            "per_page": per_page
+        }
+    )
+
+@app.delete("/delete/{image_id}")
+async def delete_image(image_id: int):
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            # Получение информации о файле
+            cursor.execute(
+                "SELECT filename FROM images WHERE id = %s",
+                (image_id,)
+            )
+            result = cursor.fetchone()
+            if not result:
+                raise HTTPException(status_code=404, detail="Изображение не найдено")
+
+            filename = result["filename"]
+            file_path = os.path.join(UPLOAD_DIR, filename)
+
+            # Удаление записи из базы данных
+            cursor.execute(
+                "DELETE FROM images WHERE id = %s",
+                (image_id,)
+            )
+            conn.commit()
+
+            # Удаление файла
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка удаления изображения: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка удаления изображения")
+    finally:
+        conn.close()
+
+    return JSONResponse(
+        status_code=200,
+        content={"status": "success", "message": "Изображение успешно удалено"}
+    )
+
+# Монтирование статических файлов
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/images", StaticFiles(directory=UPLOAD_DIR), name="images")

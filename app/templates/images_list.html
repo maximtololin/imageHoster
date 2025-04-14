@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Список изображений</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+            max-width: 200px;
+        }
+        td.filename, td.original-name {
+            position: relative;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        td.filename a, td.original-name span {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* Стили для тултипа */
+        td.filename:hover::after, td.original-name:hover::after {
+            content: attr(data-full-text);
+            position: absolute;
+            left: 0;
+            top: 100%;
+            background: white;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+            white-space: normal;
+            max-width: 400px;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Список изображений</h1>
+        <div class="navigation">
+            <a href="/" class="button">На главную</a>
+        </div>
+        
+        {% if images %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Имя файла</th>
+                    <th>Оригинальное имя</th>
+                    <th>Размер (КБ)</th>
+                    <th>Дата загрузки</th>
+                    <th>Тип файла</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for image in images %}
+                <tr>
+                    <td class="filename" data-full-text="{{ image.filename }}">
+                        <a href="/images/{{ image.filename }}" target="_blank">{{ image.filename }}</a>
+                    </td>
+                    <td class="original-name" data-full-text="{{ image.original_name }}">
+                        <span>{{ image.original_name }}</span>
+                    </td>
+                    <td>{{ (image.size / 1024)|round(2) }}</td>
+                    <td>{{ image.upload_time.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>{{ image.file_type }}</td>
+                    <td>
+                        <button onclick="deleteImage({{ image.id }})" class="delete-button">Удалить</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="?page={{ page - 1 }}" class="button">Предыдущая</a>
+            {% endif %}
+            
+            <span>Страница {{ page }} из {{ (total / per_page)|round(0, 'ceil')|int }}</span>
+            
+            {% if page * per_page < total %}
+            <a href="?page={{ page + 1 }}" class="button">Следующая</a>
+            {% endif %}
+        </div>
+        {% else %}
+        <p>Нет загруженных изображений</p>
+        {% endif %}
+    </div>
+
+    <script>
+        async function deleteImage(imageId) {
+            if (confirm('Вы уверены, что хотите удалить это изображение?')) {
+                try {
+                    const response = await fetch(`/delete/${imageId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        window.location.reload();
+                    } else {
+                        const data = await response.json();
+                        alert(data.detail || 'Ошибка при удалении изображения');
+                    }
+                } catch (error) {
+                    alert('Ошибка при удалении изображения');
+                }
+            }
+        }
+    </script>
+</body>
+</html> 

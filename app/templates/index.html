@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Hoster</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        p {
+            font-size: 18px;
+            color: #555;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            display: inline-block;
+            text-align: left;
+        }
+        #uploaded-link {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
+            display: none;
+        }
+        #uploaded-link a {
+            color: #007bff;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        .navigation {
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+        .button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+        }
+        .button:hover {
+            background-color: #0056b3;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        #progress {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0;
+            transition: width 0.3s ease-in-out;
+        }
+
+        #upload-results {
+            margin-top: 20px;
+        }
+
+        #results-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        #results-list li {
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        #results-list li.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        #results-list li.error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Добро пожаловать в Image Hoster</h1>
+    <p>Загрузите изображение и получите прямую ссылку на него.</p>
+
+    <div class="navigation">
+        <a href="/images-list" class="button">Список загруженных изображений</a>
+    </div>
+
+    <div class="instructions">
+        <h3>Как загрузить изображение?</h3>
+        <ul>
+            <li>Выберите файл в формате <strong>JPG, PNG или GIF</strong>.</li>
+            <li>Нажмите кнопку <strong>"Загрузить"</strong>.</li>
+            <li>После загрузки появится ссылка на изображение.</li>
+        </ul>
+    </div>
+
+    <!-- Форма для загрузки -->
+    <form id="upload-form">
+        <input type="file" id="file-input" accept="image/jpeg, image/png, image/gif" multiple required>
+        <button type="submit">Загрузить</button>
+    </form>
+
+    <!-- Прогресс загрузки -->
+    <div id="upload-progress" style="display: none;">
+        <p>Загружено: <span id="uploaded-count">0</span> из <span id="total-count">0</span> файлов</p>
+        <div class="progress-bar">
+            <div id="progress" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <!-- Результаты загрузки -->
+    <div id="upload-results" style="display: none;">
+        <h3>Результаты загрузки:</h3>
+        <ul id="results-list"></ul>
+    </div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            let fileInput = document.getElementById('file-input');
+            let files = fileInput.files;
+
+            if (!files.length) {
+                alert("Выберите файлы!");
+                return;
+            }
+
+            // Показываем прогресс
+            const progressDiv = document.getElementById('upload-progress');
+            const progressBar = document.getElementById('progress');
+            const uploadedCount = document.getElementById('uploaded-count');
+            const totalCount = document.getElementById('total-count');
+            const resultsList = document.getElementById('results-list');
+            
+            progressDiv.style.display = 'block';
+            document.getElementById('upload-results').style.display = 'block';
+            resultsList.innerHTML = '';
+            totalCount.textContent = files.length;
+            
+            let successful = 0;
+            
+            for (let i = 0; i < files.length; i++) {
+                let file = files[i];
+                let formData = new FormData();
+                formData.append("file", file);
+
+                try {
+                    let response = await fetch("/upload", {
+                        method: "POST",
+                        body: formData
+                    });
+
+                    let data = await response.json();
+                    
+                    if (response.ok) {
+                        successful++;
+                        resultsList.innerHTML += `<li class="success">✅ ${file.name} - успешно загружен</li>`;
+                    } else {
+                        resultsList.innerHTML += `<li class="error">❌ ${file.name} - ошибка: ${data.detail || 'Неизвестная ошибка'}</li>`;
+                    }
+                } catch (error) {
+                    resultsList.innerHTML += `<li class="error">❌ ${file.name} - ошибка соединения</li>`;
+                }
+
+                uploadedCount.textContent = i + 1;
+                progressBar.style.width = ((i + 1) / files.length * 100) + '%';
+            }
+
+            if (successful > 0) {
+                alert(`Успешно загружено ${successful} из ${files.length} файлов`);
+            }
+        });
+    </script>
+
+</body>
+</html>
