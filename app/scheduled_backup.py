@@ -18,11 +18,22 @@ logger.add(
 def scheduled_backup():
     """Функция для создания резервной копии по расписанию"""
     try:
-        logger.info("Запуск планового резервного копирования")
-        backup_file = create_backup()
-        logger.info(f"Плановое резервное копирование успешно завершено: {backup_file}")
+        # Проверяем, является ли сегодня первым днем месяца
+        today = datetime.now()
+        is_first_day_of_month = today.day == 1
+        
+        # Если это первый день месяца и время 03:00, выполняем месячное резервное копирование
+        if is_first_day_of_month and today.hour == 3:
+            logger.info("Запуск месячного резервного копирования")
+            backup_file = create_backup()
+            logger.info(f"Месячное резервное копирование успешно завершено: {backup_file}")
+        else:
+            # Обычное ежедневное резервное копирование
+            logger.info("Запуск ежедневного резервного копирования")
+            backup_file = create_backup()
+            logger.info(f"Ежедневное резервное копирование успешно завершено: {backup_file}")
     except Exception as e:
-        logger.error(f"Ошибка при плановом резервном копировании: {str(e)}")
+        logger.error(f"Ошибка при резервном копировании: {str(e)}")
 
 def main():
     # Настройка расписания
@@ -30,8 +41,8 @@ def main():
     schedule.every().day.at("00:00").do(scheduled_backup)
     # Каждую неделю в воскресенье в 12:00
     schedule.every().sunday.at("12:00").do(scheduled_backup)
-    # Каждый месяц 1-го числа в 03:00
-    schedule.every().month_start.at("03:00").do(scheduled_backup)
+    # Каждый день в 03:00 (для проверки первого дня месяца)
+    schedule.every().day.at("03:00").do(scheduled_backup)
 
     logger.info("Планировщик резервного копирования запущен")
     
